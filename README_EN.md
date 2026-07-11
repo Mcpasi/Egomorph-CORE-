@@ -1,6 +1,6 @@
 # Egomorph Core
 
-A local, installable, agentic browser app with a local LLM, OpenAI-compatible APIs, and official Codex CLI integration.
+EgoMorph Core is an open-source, gateway-first AI platform that combines local models, Codex integration, semantic skill orchestration, secure file access, persistent memory, and agentic workflows into a modular browser-based experience.
 
 ## Quick start
 
