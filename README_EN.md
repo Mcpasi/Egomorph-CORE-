@@ -4,7 +4,7 @@ EgoMorph Core is an open-source, gateway-first AI platform that combines local m
 
 ## Screenshots
 <p align="center">
-  <img src="docs/image/dashboard.png" width="900" alt="Dashboard">
+  <img src="docs/image/dashboard.jpg" width="900" alt="Dashboard">
 </p>
 
 ## Quick start
