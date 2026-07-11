@@ -2,10 +2,6 @@
 
 EgoMorph Core is an open-source, gateway-first AI platform that combines local models, Codex integration, semantic skill orchestration, secure file access, persistent memory, and agentic workflows into a modular browser-based experience.
 
-## Screenshots
-<p align="center">
-  <img src="docs/image/dashboard.jpg" width="900" alt="Dashboard">
-</p>
 
 ## Quick start
 
