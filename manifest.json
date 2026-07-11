@@ -1,0 +1,45 @@
+{
+  "name": "Egomorph Core",
+  "short_name": "Egomorph Core",
+  "id": "./",
+  "description": "Egomorph Core - eine agentische KI fuer den Browser mit lokalen, API- und Codex-Modellen.",
+  "lang": "de-DE",
+  "dir": "ltr",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone", "minimal-ui"],
+  "orientation": "portrait-primary",
+  "background_color": "#111111",
+  "theme_color": "#111111",
+  "categories": ["productivity", "education", "utilities"],
+  "icons": [
+    {
+      "src": "ego_icon_192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "ego_icon_512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Egomorph Core starten",
+      "short_name": "Start",
+      "description": "Oeffnet Egomorph Core direkt im Chat.",
+      "url": "./index.html",
+      "icons": [
+        {
+          "src": "ego_icon_192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    }
+  ]
+}

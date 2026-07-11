@@ -1,0 +1,602 @@
+<!-- Copyright 2025 - 2026 Pascal(Mcpasi) 
+    Lizens:MIT
+    Version: 2026-07-11 Beta
+    Github; https://github.com/Mcpasi/egoMorph-/tree/main
+    
+
+
+
+
+-->
+
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Egomorph Core</title>
+  <meta name="description" content="Egomorph Core ist eine installierbare, agentische PWA mit lokalen, API- und Codex-Modellen.">
+  <!-- Progressive Web App (PWA) support -->
+  <!-- Link to the web app manifest which defines how the app behaves when installed on a mobile device -->
+  <link rel="manifest" href="manifest.json">
+  <!-- Define icons for various platforms -->
+  <link rel="icon" type="image/png" sizes="192x192" href="ego_icon_192.png">
+  <link rel="apple-touch-icon" href="ego_icon_192.png">
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="load-screen.css">
+  <script>
+    // Opened by `egomorph clean`: remove only replaceable app caches and old
+    // service-worker registrations. User conversations and settings stay intact.
+    (function cleanEgoMorphBrowserCache() {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('egomorph-clean') !== '1') return;
+      const tasks = [];
+      if (window.caches && typeof window.caches.keys === 'function') {
+        tasks.push(window.caches.keys().then(keys => Promise.all(
+          keys.filter(key => /^egomorph-/i.test(key)).map(key => window.caches.delete(key))
+        )));
+      }
+      if (navigator.serviceWorker && typeof navigator.serviceWorker.getRegistrations === 'function') {
+        tasks.push(navigator.serviceWorker.getRegistrations().then(registrations => Promise.all(
+          registrations.map(registration => registration.unregister())
+        )));
+      }
+      window.__egoMorphCleanPromise = Promise.allSettled(tasks).then(() => {
+        const cleanUrl = new URL(window.location.href);
+        cleanUrl.searchParams.delete('egomorph-clean');
+        cleanUrl.searchParams.set('egomorph-cleaned', String(Date.now()));
+        window.location.replace(cleanUrl.toString());
+      });
+    })();
+  </script>
+  <!-- Set the theme colour for the browser UI and iOS status bar -->
+  <meta name="theme-color" content="#081013">
+  <meta name="application-name" content="Egomorph Core">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <meta name="apple-mobile-web-app-title" content="Egomorph Core">
+  <!-- Load Font Awesome for icons (e.g. a brain icon) -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <script src="skillSystem.js"></script>
+  <script src="agentResponse.js"></script>
+  <script src="conversationStore.js"></script>
+  <script src="resourceProfile.js"></script>
+  <script type="module">
+   // Transformers.js is needed only by the optional local generative model.
+    const profile = (window.egoProfile && window.egoProfile.get()) || 'codex';
+    if (profile !== 'full') {
+      console.log('[Egomorph Core] Profil "' + profile + '" – Transformers.js wird nicht geladen.');
+      window.__egoTransformersReady = true;
+      document.dispatchEvent(new Event('transformers-ready'));
+    } else {
+      try {
+        const mod = await import('https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2/dist/transformers.js');
+        mod.env.allowLocalModels = false;
+        window.TransformersPipeline = mod.pipeline;
+        window.TransformersEnv = mod.env;
+        window.TransformersStoppingCriteria = mod.StoppingCriteria;
+        window.TransformersStoppingCriteriaList = mod.StoppingCriteriaList;
+      } catch (err) {
+        window.__egoTransformersLoadError = err;
+        console.error('[Egomorph Core] Transformers.js konnte nicht geladen werden:', err);
+      } finally {
+        window.__egoTransformersReady = true;
+        document.dispatchEvent(new Event('transformers-ready'));
+      }
+    }
+    </script>
+  <!-- Safetyfilter.ts kompiliert zu Safetyfilter.js (siehe tsconfig.json: `npx tsc`).
+       Muss vor chatModel.js geladen werden, damit window.SafetyFilter verfügbar ist. -->
+  <script src="Safetyfilter.js"></script>
+  <script src="chatModel.js"></script>
+  <script src="ltmManager.js"></script>
+  <script src="translations/de.js"></script>
+  <script src="translations/en.js"></script>
+  <script src="translations/fr.js"></script>
+ 
+  <!-- __RESPONSIVE_CSS__ -->
+
+  <style>
+    :root{
+      --bg:#081013;--fg:#eef7f7;--muted:#9fb2b7;--accent:#46c7d8;--accent-2:#2dd4bf;--card:#101820;--border:#26343c;
+      --radius:10px;--shadow:0 16px 40px rgba(0,0,0,.32)
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{margin:0;background:radial-gradient(circle at top,rgba(70,199,216,.16),transparent 34rem),linear-gradient(180deg,var(--bg),#0d151b 54%,#070b0f);color:var(--fg);font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,"Helvetica Neue",Arial,sans-serif}
+    .app{
+      max-width:1100px;margin:0 auto;padding:16px 16px 88px; /* leave space for mobile bottom bar */
+    }
+    .card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow)}
+    #appLogo{position:fixed;top:12px;left:12px;z-index:70;display:inline-flex;align-items:center;justify-content:center;pointer-events:none}
+    #appLogo img{height:52px;width:auto;display:block}
+    @media (max-width: 960px){ #appLogo img{height:40px} }
+    .toolbar{position:sticky;top:0;z-index:50;background:rgba(15,17,23,.7);backdrop-filter:saturate(140%) blur(8px);border-bottom:1px solid var(--border)}
+    .toolbar .inner{display:flex;gap:12px;align-items:center;justify-content:space-between;max-width:1100px;margin:0 auto;padding:10px 16px}
+    .toolbar h1{font-size:18px;margin:0;font-weight:650;letter-spacing:.2px}
+    .toolbar .actions{display:flex;gap:8px}
+    button,.btn{
+      display:inline-flex;align-items:center;gap:8px;border:1px solid var(--border);background:#191a23;color:var(--fg);
+      padding:10px 14px;border-radius:12px;cursor:pointer;transition:.2s transform,.2s background;touch-action:manipulation;
+    }
+    button:active{transform:translateY(1px)}
+    .btn-primary{background:linear-gradient(135deg,var(--accent),var(--accent-2));border-color:transparent;color:#fff}
+    .grid{display:grid;grid-template-columns:1fr 380px;gap:16px}
+    .panel{padding:14px}
+    .chat{display:flex;flex-direction:column;gap:12px}
+    .msg{padding:12px 14px;border-radius:14px;line-height:1.45}
+    .msg.user{background:#1b2330;border:1px solid #1f2a3a}
+    .msg.bot{background:#1a1a25;border:1px solid #24243a}
+    .input-bar{
+      position:fixed;left:0;right:0;bottom:0;z-index:60;background:rgba(15,17,23,.85);backdrop-filter:blur(8px);
+      border-top:1px solid var(--border);padding:10px 12px;
+    }
+    .input-inner{max-width:1100px;margin:0 auto;display:flex;gap:10px}
+    .input-inner input[type="text"], .input-inner textarea{
+      flex:1;background:#141624;border:1px solid var(--border);border-radius:12px;padding:12px 14px;color:var(--fg);
+      min-height:44px;resize:none
+    }
+    .toast{position:fixed;right:14px;bottom:88px;background:#10131a;border:1px solid #203047;border-radius:12px;padding:10px 12px;opacity:0;transform:translateY(10px);transition:.25s}
+    .toast.show{opacity:1;transform:none}
+    @media (max-width: 960px){
+      .grid{grid-template-columns:1fr}
+      .toolbar h1{font-size:16px}
+      .panel{padding:12px}
+      .app{padding-bottom:92px}
+    }
+    @media (hover:hover){
+      button:hover{background:#202235}
+      .btn-primary:hover{filter:brightness(1.06)}
+    }
+  </style>
+
+</head>
+<body>
+  <script src="loader.js"></script>
+  <!-- Egomorph Core wordmark and welcome modal -->
+  <div id="appLogo" aria-label="Egomorph Core Logo">
+    <img src="egomorph-core.svg" alt="Egomorph Core">
+  </div>
+    <!-- Modal overlay shown on first load.  It introduces the user to the app. -->
+  <div id="welcomeModal" class="modal">
+    <div class="modal-content">
+      <p id="welcomeText">Willkommen bei Egomorph Core, deinem agentischen KI-Arbeitsbereich.</p>
+      <button id="closeModalBtn">OK</button>
+    </div>
+  </div>
+  <script>
+    // Keep the welcome dialog independent from the larger application script.
+    // A failed optional module must never make the OK button unusable.
+    (function bindWelcomeModal() {
+      const modal = document.getElementById('welcomeModal');
+      const closeBtn = document.getElementById('closeModalBtn');
+      if (!modal || !closeBtn) return;
+      let alreadyShown = false;
+      try { alreadyShown = !!localStorage.getItem('welcomeShown'); } catch (_) {}
+      modal.style.display = alreadyShown ? 'none' : 'flex';
+      closeBtn.addEventListener('click', () => {
+        modal.style.display = 'none';
+        try { localStorage.setItem('welcomeShown', 'true'); } catch (_) {}
+      });
+    })();
+  </script>
+
+  <button id="conversationDrawerToggle" class="conversation-drawer-toggle" type="button"
+          aria-controls="conversationSidebar" aria-expanded="false" title="Unterhaltungen öffnen">
+    <span aria-hidden="true">☰</span><span id="conversationDrawerToggleLabel">Unterhaltungen</span>
+  </button>
+  <button id="conversationDrawerBackdrop" class="conversation-drawer-backdrop" type="button"
+          tabindex="-1" aria-label="Unterhaltungen schließen"></button>
+  <aside id="conversationSidebar" class="conversation-sidebar" aria-label="Unterhaltungen">
+    <div class="conversation-sidebar-header">
+      <h2 id="conversationSidebarTitle">Unterhaltungen</h2>
+      <button id="conversationDrawerClose" class="conversation-drawer-close" type="button"
+              aria-label="Unterhaltungen schließen">×</button>
+    </div>
+    <button id="newConversationBtn" class="new-conversation-btn" type="button">＋ Neue Unterhaltung</button>
+    <div id="conversationThreadList" class="conversation-thread-list" role="list"></div>
+    <p id="conversationSidebarHint" class="conversation-sidebar-hint">Jede Unterhaltung wird lokal gespeichert und im Codex-Modus als eigener App-Server-Thread fortgesetzt.</p>
+  </aside>
+
+  <div id="egoCoreLogoMotion" class="ego-core-logo-motion" aria-hidden="true">
+    <img src="egomorph-core.svg" alt="" draggable="false">
+  </div>
+  <div id="inputSection">
+    <header class="active-conversation-header">
+      <span id="activeConversationEyebrow">Aktive Unterhaltung</span>
+      <strong id="activeConversationTitle">Neue Unterhaltung</strong>
+    </header>
+    <form id="inputForm">
+      <textarea id="inputText" rows="3" placeholder="Sag etwas..."></textarea>
+      <!-- Assign an id to the send button so its label can be translated dynamically -->
+      <div class="input-actions">
+        <button id="sendBtn" type="submit">Senden</button>
+        <button id="stopBtn" type="button" hidden>Antwort stoppen</button>
+        <button id="speechButton" type="button" title="Spracheingabe starten">🎤</button>
+        <button id="markdownUploadBtn" type="button" title="Markdown-Datei ins Modell-Home hochladen">MD hochladen</button>
+        <input id="markdownUploadInput" type="file" accept=".md,text/markdown" multiple hidden>
+      </div>
+    </form>
+    <div id="codexComposerControls" class="codex-composer-controls" hidden>
+      <label for="codexModelSelect" id="codexModelSelectLabel">Codex-Modell</label>
+      <select id="codexModelSelect">
+        <option value="">Codex-Standard</option>
+      </select>
+      <label for="codexReasoningSelect" id="codexReasoningSelectLabel">Denkstufe</label>
+      <select id="codexReasoningSelect">
+        <option value="">Aus (Codex-Standard)</option>
+        <option value="low">Low</option>
+        <option value="medium">Medium</option>
+        <option value="high">High</option>
+      </select>
+      <span id="codexModelSelectStatus" class="composer-control-status" role="status" aria-live="polite"></span>
+    </div>
+    <div id="markdownUploadStatus" class="upload-status" aria-live="polite"></div>
+    <div id="response" role="log" aria-live="polite"></div>
+    <div id="memory"></div>
+    <section id="egoWriterMount" aria-label="Egomorph Core Writer"></section>
+    <!-- Settings toggle and panel -->
+    <div id="toggleContainer" style="margin-top:10px; display:flex; gap:5px;">
+      <button id="settingsToggle" aria-controls="settingsPanel" aria-expanded="false">⚙️ Einstellungen</button>
+      <button id="writerToggle" type="button" aria-controls="egoWriterPanel" aria-expanded="false">Writer</button>
+      <!-- Info toggle sits next to the settings button. Clicking it reveals
+           a compact project description and license note. -->
+      <button id="infoToggle" aria-controls="infoPanel" aria-expanded="false">ℹ️&nbsp;Info</button>
+    </div>
+      <div id="settingsPanel" role="region" aria-labelledby="settingsTitle" aria-hidden="true">
+      <div class="settings-header">
+        <h2 id="settingsTitle">Einstellungen</h2>
+        <p id="settingsIntro">Konfiguriere die generativen Backends und agentischen Fähigkeiten von Egomorph Core.</p>
+        </div>
+      <div class="settings-sections">
+       <details class="settings-section settings-section-compact" open>
+      <summary id="settingsQuickSummary">Schnellaktionen</summary>
+        <div class="settings-section-body">
+          <p id="quickActionsHint" class="settings-hint">Steuere Verlauf, Stimme und gespeicherte Daten direkt von hier.</p>
+          <div class="settings-actions">
+            <button id="clearConvBtn">Chatverlauf löschen</button>
+            <button id="toggleVoiceBtn">Stimme deaktivieren</button>
+            <button id="ltmExportBtn">Speichern</button>
+            <button id="ltmClearBtn">Löschen</button>
+          </div>
+        
+      </div>
+      </details>
+
+      <details class="settings-section settings-section-compact">
+        <summary id="settingsPersonalSummary">Persönliche Ansprache</summary>
+        <div class="settings-section-body">
+          <div class="settings-field">
+            <label id="userNameLabel" for="userNameInput">Dein&nbsp;Name</label>
+            <input id="userNameInput" type="text" placeholder="z.&nbsp;B. Pascal">
+          </div>
+          <div class="settings-inline-actions">
+            <button id="saveUserNameBtn">Speichern</button>
+            <button id="clearUserNameBtn" title="Name entfernen">Löschen</button>
+            <span id="currentUserName" class="settings-note"></span>
+          </div>
+          <p id="personalHint" class="settings-hint">Egomorph Core kann diesen Namen als lokale Einstellung verwenden.</p>
+        </div>
+      </details>
+
+      <details id="resourceProfileSettings" class="settings-section settings-section-wide" open>
+        <summary id="resourceProfileSummary">Ressourcen-Profil</summary>
+        <div class="settings-section-body">
+          <p id="resourceProfileIntro" class="settings-hint" style="margin-bottom:10px">
+            Wähle ein generatives Backend für Egomorph Core.
+          </p>
+          <div class="settings-field" style="flex-direction:column;gap:8px">
+            <label class="profile-radio">
+              <input type="radio" name="resourceProfile" value="full"
+                     onchange="window.egoProfile && window.egoProfile.set('full')">
+              <span><strong id="resourceProfileFullName">Lokal</strong> <span id="resourceProfileFullText">– Generatives Browser-LLM</span>
+              <br><small id="resourceProfileFullMeta" style="color:var(--muted)">Modellabhängiger Speicherbedarf, vollständig lokal</small></span>
+            </label>
+            <label class="profile-radio">
+              <input type="radio" name="resourceProfile" value="api"
+                     onchange="window.egoProfile && window.egoProfile.set('api')">
+              <span><strong>API</strong> <span id="resourceProfileApiText">– Externe API (OpenRouter / OpenAI / Ollama / LM Studio)</span>
+              <br><small id="resourceProfileApiMeta" style="color:var(--muted)">~0 MB lokal, braucht API-Endpunkt</small></span>
+            </label>
+            <label class="profile-radio">
+              <input type="radio" name="resourceProfile" value="codex"
+                     onchange="window.egoProfile && window.egoProfile.set('codex')">
+              <span><strong>Codex</strong> <span id="resourceProfileCodexText">– Lokaler Codex App Server mit ChatGPT-Login</span>
+              <br><small id="resourceProfileCodexMeta" style="color:var(--muted)">~0 MB im Browser, braucht das Egomorph-Core-Gateway auf localhost</small></span>
+            </label>
+          </div>
+          <p id="resourceProfileReloadHint" class="settings-hint" style="margin-top:8px;color:#fa0">
+            Profiländerung wird nach Neuladen der Seite wirksam.
+          </p>
+        </div>
+      </details>
+
+      <details id="skillSettings" class="settings-section settings-section-wide">
+        <summary id="skillSettingsSummary">Skills</summary>
+        <div class="settings-section-body">
+          <p id="skillSettingsIntro" class="settings-hint" style="margin-bottom:8px">
+            Verwalte installierte Skills, ihre Rechte, Profile und Einrichtung.
+          </p>
+          <div id="skillCatalog" class="skill-catalog" aria-live="polite">
+            <p class="settings-note">Skill-Manifeste werden geladen …</p>
+          </div>
+        </div>
+      </details>
+ 
+      <details id="apiSettings" class="settings-section settings-section-wide" style="display:none">
+        <summary id="apiSettingsSummary">API-Einstellungen</summary>
+        <div class="settings-section-body">
+          <p id="apiSettingsIntro" class="settings-hint" style="margin-bottom:8px">
+            Verbinde Egomorph Core mit einem externen LLM. Funktioniert mit OpenAI,
+            OpenRouter, Ollama (<code>http://localhost:11434</code>), LM Studio,
+            llama.cpp und jedem OpenAI-kompatiblen Endpunkt.
+          </p>
+          <p id="apiSettingsWarning" class="settings-hint" style="margin-bottom:8px;color:#fa0">
+            Hinweis: API-Keys werden im Browser gespeichert. Für öffentliche Deployments ist
+            ein eigener Proxy sicherer als ein direkt eingetragener Key.
+          </p>
+          <div class="settings-field">
+            <label id="apiUrlLabel" for="egoApiUrlInput">API-URL</label>
+            <input id="egoApiUrlInput" type="text"
+                   placeholder="z. B. https://openrouter.ai/api/v1/chat/completions"
+                   style="flex:1">
+          </div>
+          <div class="settings-field" style="margin-top:6px">
+            <label id="apiKeyLabel" for="egoApiKeyInput">API-Key</label>
+            <input id="egoApiKeyInput" type="password"
+                   placeholder="OpenRouter/OpenAI Key oder leer bei lokalen Endpunkten"
+                   style="flex:1">
+          </div>
+          <div class="settings-field" style="margin-top:6px">
+            <label id="apiModelLabel" for="egoApiModelInput">Modell-Name</label>
+            <input id="egoApiModelInput" type="text"
+                   placeholder="z. B. openrouter/auto, openai/gpt-4o-mini, llama3"
+                   style="flex:1">
+          </div>
+          <div class="settings-field" style="margin-top:6px">
+            <label id="apiMaxTokensLabel" for="egoApiMaxTokensInput">Max. Antwort-Tokens</label>
+            <input id="egoApiMaxTokensInput" type="number" min="50" max="1000" value="700"
+                   style="width:90px"
+                   onchange="window.egoProfile && window.egoProfile.setApiMaxTokens(this.value)">
+          </div>
+          <p id="apiMaxTokensHint" class="settings-hint" style="margin-top:4px">
+            Gilt nur für API-Antworten. Höhere Werte verhindern abgeschnittene Antworten.
+          </p>
+          <div class="settings-inline-actions" style="margin-top:8px">
+            <button onclick="(function(){
+              var u=document.getElementById('egoApiUrlInput');
+              var k=document.getElementById('egoApiKeyInput');
+              var m=document.getElementById('egoApiModelInput');
+              var mt=document.getElementById('egoApiMaxTokensInput');
+              if(window.egoProfile){
+                window.egoProfile.setApiConfig(u?u.value:'',k?k.value:'',m?m.value:'');
+                window.egoProfile.setApiMaxTokens(mt?mt.value:'');
+              }
+              var s=document.getElementById('apiStatusText');
+              if(s){s.textContent=window.egoT ? window.egoT('apiSavedStatus') : 'Gespeichert';s.style.color='#6f6';}
+            })()" id="apiSaveBtn">Speichern</button>
+            <button onclick="(function(){
+              var s=document.getElementById('apiStatusText');
+              if(s){s.textContent=window.egoT ? window.egoT('apiTestingStatus') : 'Teste...';s.style.color='#aaa';}
+              if(!window.egoProfile){return;}
+              window.egoProfile.apiChatCompletion([{role:'user',content:'Hallo'}],10)
+                .then(function(){if(s){s.textContent=window.egoT ? window.egoT('apiConnectionOkStatus') : 'Verbindung OK';s.style.color='#6f6';}})
+                .catch(function(e){if(s){s.textContent=(window.egoT ? window.egoT('apiErrorStatusPrefix') : 'Fehler: ')+String(e).slice(0,80);s.style.color='#f66';}});
+            })()" id="apiTestBtn">Verbindung testen</button>
+            <span id="apiStatusText" class="settings-note" style="color:#aaa"></span>
+          </div>
+          <div style="margin-top:12px">
+            <p class="settings-hint"><strong id="apiExamplesTitle">Beispiel-Konfigurationen:</strong></p>
+            <div class="settings-actions" style="margin-top:6px">
+              <button onclick="(function(){
+                var u=document.getElementById('egoApiUrlInput');
+                var m=document.getElementById('egoApiModelInput');
+                if(u)u.value='https://openrouter.ai/api/v1/chat/completions';
+                if(m)m.value='openrouter/auto';
+              })()">OpenRouter Auto</button>
+              <button onclick="(function(){
+                var u=document.getElementById('egoApiUrlInput');
+                var m=document.getElementById('egoApiModelInput');
+                if(u)u.value='https://openrouter.ai/api/v1/chat/completions';
+                if(m)m.value='openai/gpt-4o-mini';
+              })()">OpenRouter GPT</button>
+              <button onclick="(function(){
+                var u=document.getElementById('egoApiUrlInput');
+                var m=document.getElementById('egoApiModelInput');
+                if(u)u.value='http://localhost:11434';
+                if(m)m.value='llama3';
+              })()">Ollama (lokal)</button>
+              <button onclick="(function(){
+                var u=document.getElementById('egoApiUrlInput');
+                var m=document.getElementById('egoApiModelInput');
+                if(u)u.value='http://localhost:1234';
+                if(m)m.value='local-model';
+              })()">LM Studio</button>
+              <button onclick="(function(){
+                var u=document.getElementById('egoApiUrlInput');
+                var m=document.getElementById('egoApiModelInput');
+                if(u)u.value='https://api.openai.com';
+                if(m)m.value='gpt-5.4-mini';
+              })()">OpenAI</button>
+              </div>
+            </div>
+        </div>
+      </details>
+
+      <details id="codexSettings" class="settings-section settings-section-wide" style="display:none">
+        <summary id="codexSettingsSummary">Codex-Gateway</summary>
+        <div class="settings-section-body">
+          <p id="codexSettingsIntro" class="settings-hint" style="margin-bottom:8px">
+            Nutzt das lokale Egomorph-Core-Gateway zur offiziellen Codex-CLI mit persistentem Codex App Server und Streaming. Melde dich einmal mit
+            <code>./egomorph codex login</code> oder <code>./egomorph codex login --device-auth</code> an und starte danach
+            <code>./egomorph dashboard</code> oder <code>./egomorph gateway</code>.
+          </p>
+          <p id="codexSettingsWarning" class="settings-hint" style="margin-bottom:8px;color:#fa0">
+            Die Bridge ist nur fuer lokale, vertrauenswuerdige Nutzung gedacht. Keine ChatGPT-Cookies,
+            Access-Tokens oder auth.json in die App kopieren.
+          </p>
+          <div class="settings-hint" style="margin-bottom:10px;padding:10px 12px;border:1px solid rgba(110,168,254,.28);border-radius:8px;background:rgba(110,168,254,.06)">
+            <strong id="codexSetupTitle">Einrichtung in 3 Schritten</strong>
+            <ol style="margin:6px 0 0 18px;padding:0">
+              <li id="codexStepLogin">Einmal anmelden: <code>./egomorph codex login</code> oder auf Termux/headless <code>./egomorph codex login --device-auth</code>.</li>
+              <li id="codexStepBridge">Gateway starten: <code>./egomorph dashboard</code> oder ohne Browserstart <code>./egomorph gateway</code>.</li>
+              <li id="codexStepCheck">Hier speichern und mit <strong>Status prüfen</strong> kontrollieren.</li>
+            </ol>
+            <p id="codexPersistentHint" style="margin:7px 0 0">
+              Nach erfolgreichem Login bleibt Codex lokal angemeldet. Das Gateway haelt laufende App-Server-Sessions; Egomorph Core speichert nur Bridge-URL, Modell und Tokenlimit.
+            </p>
+          </div>
+          <div class="settings-field">
+            <label id="codexBridgeUrlLabel" for="egoCodexBridgeUrlInput">Bridge-URL</label>
+            <input id="egoCodexBridgeUrlInput" type="text"
+                   placeholder="http://localhost:8787"
+                   style="flex:1">
+          </div>
+          <div class="settings-field" style="margin-top:6px">
+            <label id="codexModelLabel" for="egoCodexModelInput">Codex-Modell</label>
+            <input id="egoCodexModelInput" type="text"
+                   placeholder="leer = Codex-Standard"
+                   style="flex:1">
+          </div>
+          <div class="settings-field" style="margin-top:6px">
+            <label id="codexMaxTokensLabel" for="egoCodexMaxTokensInput">Max. Antwort-Tokens</label>
+            <input id="egoCodexMaxTokensInput" type="number" min="50" max="1000" value="700"
+                   style="width:90px"
+                   onchange="window.egoProfile && window.egoProfile.setCodexMaxTokens(this.value)">
+          </div>
+          <p id="codexMaxTokensHint" class="settings-hint" style="margin-top:4px">
+            Gilt nur fuer den Codex-Modus. Der Wert wird als Laengenhinweis an den App-Server uebergeben.
+          </p>
+          <div class="settings-inline-actions" style="margin-top:8px">
+            <button onclick="(function(){
+              var u=document.getElementById('egoCodexBridgeUrlInput');
+              var m=document.getElementById('egoCodexModelInput');
+              var mt=document.getElementById('egoCodexMaxTokensInput');
+              if(window.egoProfile){
+                window.egoProfile.setCodexConfig(u?u.value:'',m?m.value:'');
+                window.egoProfile.setCodexMaxTokens(mt?mt.value:'');
+              }
+              var s=document.getElementById('codexStatusText');
+              if(s){s.textContent=window.egoT ? window.egoT('codexSavedStatus') : 'Gespeichert';s.style.color='#6f6';}
+            })()" id="codexSaveBtn">Speichern</button>
+            <button onclick="(function(){
+              var s=document.getElementById('codexStatusText');
+              var u=document.getElementById('egoCodexBridgeUrlInput');
+              var m=document.getElementById('egoCodexModelInput');
+              var mt=document.getElementById('egoCodexMaxTokensInput');
+              if(window.egoProfile){
+                window.egoProfile.setCodexConfig(u?u.value:'',m?m.value:'');
+                window.egoProfile.setCodexMaxTokens(mt?mt.value:'');
+              }
+              if(s){s.textContent=window.egoT ? window.egoT('codexTestingStatus') : 'Teste...';s.style.color='#aaa';}
+              if(!window.egoProfile){return;}
+              window.egoProfile.codexChatCompletion([{role:'user',content:'Antworte nur mit OK.'}],20)
+                .then(function(){if(s){s.textContent=window.egoT ? window.egoT('codexConnectionOkStatus') : 'Bridge OK';s.style.color='#6f6';}})
+                .catch(function(e){if(s){s.textContent=(window.egoT ? window.egoT('codexErrorStatusPrefix') : 'Fehler: ')+String(e).slice(0,80);s.style.color='#f66';}});
+            })()" id="codexTestBtn">Bridge testen</button>
+            <button onclick="(function(){
+              var s=document.getElementById('codexStatusText');
+              var u=document.getElementById('egoCodexBridgeUrlInput');
+              var m=document.getElementById('egoCodexModelInput');
+              var mt=document.getElementById('egoCodexMaxTokensInput');
+              if(window.egoProfile){
+                window.egoProfile.setCodexConfig(u?u.value:'',m?m.value:'');
+                window.egoProfile.setCodexMaxTokens(mt?mt.value:'');
+              }
+              if(s){s.textContent=window.egoT ? window.egoT('codexStatusChecking') : 'Prüfe Status...';s.style.color='#aaa';}
+              if(!window.egoProfile || typeof window.egoProfile.codexBridgeStatus !== 'function'){return;}
+              window.egoProfile.codexBridgeStatus()
+                .then(function(data){
+                  if(!s)return;
+                  var login=data&&data.login;
+                  if(login&&login.loggedIn){
+                    var tpl=window.egoT?window.egoT('codexStatusLoggedIn'):'Bridge OK, angemeldet ({method}) und dauerhaft lokal gespeichert';
+                    s.textContent=tpl.replace('{method}',login.method||'Codex');
+                    s.style.color='#6f6';
+                  }else{
+                    s.textContent=window.egoT?window.egoT('codexStatusLoginMissing'):'Bridge OK, aber Codex ist noch nicht angemeldet';
+                    s.style.color='#fa0';
+                  }
+                })
+                .catch(function(e){if(s){s.textContent=(window.egoT?window.egoT('codexErrorStatusPrefix'):'Fehler: ')+String(e).slice(0,100);s.style.color='#f66';}});
+            })()" id="codexStatusBtn">Status prüfen</button>
+            <span id="codexStatusText" class="settings-note" style="color:#aaa"></span>
+          </div>
+        </div>
+      </details>
+            
+            
+      <details id="chatModelSettings" class="settings-section settings-section-wide">
+        <summary id="chatModelSettingsSummary">Chat-Modell (LLM)</summary>
+        <div class="settings-section-body">
+          <div class="settings-field">
+            <label id="chatModelIdLabel" for="customChatModelId">Hugging&nbsp;Face&nbsp;Model&nbsp;ID</label>
+            <input id="customChatModelId" type="text"
+                   placeholder="z.&nbsp;B. Xenova/gpt2"
+                  style="flex:1">
+          </div>
+          <div class="settings-inline-actions">
+            <button id="reloadChatModelBtn" onclick="reloadChatModel()">Modell laden</button>
+            <span id="chatModelStatusText" class="settings-note" style="color:#aaa">Kein Modell geladen</span>
+          </div>
+          <div class="settings-field" style="margin-top:10px">
+            <label id="llmMaxTokensLabel" for="llmMaxTokensInput">Max.&nbsp;Token</label> 
+            <input id="llmMaxTokensInput" type="number" min="20" max="300" value="80"
+                   style="width:80px"
+                   onchange="saveLLMMaxTokens(this.value)">
+          </div>
+          <div class="settings-field" style="margin-top:6px">
+            <label id="llmEnabledLabel" for="llmEnabledToggle">LLM-Antworten&nbsp;aktivieren</label>
+            <input id="llmEnabledToggle" type="checkbox"
+                   style="width:auto;margin-left:8px"
+                   onchange="setLLMEnabled(this.checked)">
+          </div>
+          <p id="chatModelSettingsHint" class="settings-hint">
+            <code>text-generation</code>-Modell für autonome Antworten (z.&nbsp;B.
+            <code>Xenova/gpt2</code>).
+            Wenn aktiviert, übernimmt das LLM die lokale Antwortgenerierung.
+            Größere Modelle = bessere Qualität, aber längere Ladezeit.
+            </p>
+          <div style="margin-top:8px">
+            <p class="settings-hint"><strong id="lightChatModelsTitle">Leichte Modelle:</strong></p>
+            <div class="settings-actions" style="margin-top:4px">
+              <button onclick="document.getElementById('customChatModelId').value='Xenova/distilgpt2'"
+                title="~200 MB – sehr klein, schnell">DistilGPT-2 (~200 MB)</button>
+                <button onclick="document.getElementById('customChatModelId').value='Xenova/gpt2'"
+                title="~500 MB – Standard GPT-2">GPT-2 (~500 MB)</button>
+            </div>
+          </div>
+          </div>
+      </Details>
+
+      <details class="settings-section settings-section-compact">
+        <summary id="languageSummary">Sprache</summary>
+        <div class="settings-section-body">
+          <div class="settings-field">
+            <label id="languageLabel" for="languageSelect">Sprache</label>
+            <select id="languageSelect">
+              <option value="de">Deutsch</option>
+              <option value="en">English</option>
+              <option value="fr">Français</option>
+            </select>
+          </div>
+        </div>
+      </details>
+      </div>
+    </div>
+    <!-- Information panel toggled by the info button. Initially hidden. -->
+   <div id="infoPanel" aria-hidden="true" style="display:none; margin-top:10px; background:#222; padding:10px; border:1px solid #444; width: min(320px, 90vw);">
+      <p id="infoContent" style="margin:0; font-size:0.9em; line-height:1.4;">
+        Egomorph Core ist eine lokale, PWA-fähige und agentische Browser-App mit lokalem LLM sowie optionalem API- oder Codex-Backend.
+        <br><br>
+        Copyright CreateWithCode 2025 - 2026<br>
+        Unter der MIT-Lizenz.
+      </p>
+    </div>
+  </div>
+
+  <script src="app.js" defer></script>
+  <script src="Writer.js" defer></script>
+</body>
+</html>

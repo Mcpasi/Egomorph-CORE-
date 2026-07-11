@@ -1,0 +1,30 @@
+{
+  "name": "egomorph",
+  "version": "1.0.0",
+  "description": "Egomorph Core: lokales Gateway fuer Dashboard, Codex-Bridge und agentische Browser-App.",
+  "main": "index.html",
+  "bin": {
+    "egomorph": "egomorph"
+  },
+  "scripts": {
+    "build:safetyfilter": "tsc",
+    "dashboard": "node egomorph dashboard --no-open",
+    "gateway": "node egomorph gateway",
+    "codex:bridge": "node egomorph gateway",
+    "codex:login": "node egomorph codex login",
+    "codex:login:device": "node egomorph codex login --device-auth",
+    "codex:login:persistent": "node egomorph codex login",
+    "codex:login:persistent:device": "node egomorph codex login --device-auth",
+    "codex:status": "node egomorph codex status",
+    "pwa:validate": "node scripts/validate-pwa.js",
+    "serve": "node egomorph dashboard --no-open",
+    "test": "jest"
+  },
+  "author": "",
+  "license": "MIT",
+  "type": "commonjs",
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "typescript": "^5.9.3"
+  }
+}
