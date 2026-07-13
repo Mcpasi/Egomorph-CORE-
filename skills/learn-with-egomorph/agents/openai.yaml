@@ -1,0 +1,4 @@
+interface:
+  display_name: "Learn with EgoMorph"
+  short_description: "JavaScript und EgoMorph spielerisch lernen"
+  default_prompt: "Use $learn-with-egomorph to teach me JavaScript through EgoMorph architecture."
