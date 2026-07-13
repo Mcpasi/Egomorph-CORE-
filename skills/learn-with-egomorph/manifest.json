@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "id": "learning.egomorph",
+  "name": "Learn with EgoMorph",
+  "displayNameKey": "learnWithEgomorphSkillName",
+  "descriptionKey": "learnWithEgomorphSkillDescription",
+  "version": "1.0.0",
+  "entrypoint": "skills/learnWithEgomorphSkill.js",
+  "builtIn": true,
+  "defaultEnabled": false,
+  "profiles": ["api", "codex"],
+  "permissions": []
+}
