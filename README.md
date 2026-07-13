@@ -1,6 +1,6 @@
 # Egomorph Core
 
-##Codex
+## Codex
 
 The entire skill system was created using Codex (GPT 5.6).
 
