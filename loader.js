@@ -4,7 +4,7 @@
     // 1. Konfiguration
     const CONFIG = {
         title: "EGOMORPH",
-        version: "v0.1.0.5-Beta",
+        version: "2026-07-13 Beta",
         description: "Initialisiere Systemkerne...",
         duration: 1600,
         failsafe: 9000
