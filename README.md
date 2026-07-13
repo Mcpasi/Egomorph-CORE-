@@ -1,5 +1,11 @@
 # Egomorph Core
 
+##Codex
+
+The entire skill system was created using Codex (GPT 5.6).
+
+
+
 > **A local control center for agentic AI:** one installable browser interface, three interchangeable model paths, and a transparent permission-based skill system.
 
 [Deutsche Version](README_DE.md) · [Detailed documentation](DOKUMENTATION_EN.md) · MIT License
