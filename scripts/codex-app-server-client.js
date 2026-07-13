@@ -255,6 +255,15 @@ class CodexAppServerClient {
           return;
         }
 
+        if ((message.method === 'item/started' || message.method === 'item/completed') &&
+            params.item && params.item.type === 'webSearch') {
+          const callback = message.method === 'item/started'
+            ? options.onWebSearchStart
+            : options.onWebSearchComplete;
+          if (typeof callback === 'function') callback(params.item);
+          return;
+        }
+
         if (message.method === 'item/completed' &&
             params.item && params.item.type === 'agentMessage' &&
             typeof params.item.text === 'string') {

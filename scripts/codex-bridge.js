@@ -26,6 +26,8 @@ const DEFAULT_MAX_FILE_CONTEXT_CHARS = 12000;
 const DEFAULT_MAX_MODEL_FILE_WRITE_CHARS = 120000;
 const ALLOWED_MODEL_FILE_EXTENSIONS = new Set(['.json', '.md', '.txt']);
 const ALLOWED_MODEL_FILE_WRITE_EXTENSIONS = new Set(['.md']);
+const EXTENDED_FILE_EXTENSIONS = new Set(['.js', '.css', '.html', '.py']);
+const EXTENDED_FILE_SKILL_ID = 'workspace.extended-files';
 const BLOCKED_SCRIPT_EXTENSIONS = new Set([
   '.js',
   '.mjs',
@@ -35,7 +37,8 @@ const BLOCKED_SCRIPT_EXTENSIONS = new Set([
   '.jsx',
   '.html',
   '.htm',
-  '.css'
+  '.css',
+  '.py'
 ]);
 const MODEL_FILE_EXTENSIONS = [
   'json',
@@ -49,7 +52,8 @@ const MODEL_FILE_EXTENSIONS = [
   'jsx',
   'html',
   'htm',
-  'css'
+  'css',
+  'py'
 ];
 const DEFAULT_DASHBOARD_FILES = new Set([
   'index.html',
@@ -59,6 +63,10 @@ const DEFAULT_DASHBOARD_FILES = new Set([
   'loader.js',
   'skills/internetSkill.js',
   'skills/internet/manifest.json',
+  'skills/extendedFileSkill.js',
+  'skills/extended-files/manifest.json',
+  'skills/learnWithEgomorphSkill.js',
+  'skills/learn-with-egomorph/manifest.json',
   'skillSystem.js',
   'agentResponse.js',
   'conversationStore.js',
@@ -401,6 +409,27 @@ function resolveWithinModelHome(homeDir, requestedPath) {
   return { resolved, relative: relative || path.basename(resolved) };
 }
 
+function assertSafeModelHomePath(homeDir, resolvedPath) {
+  const relative = path.relative(homeDir, resolvedPath);
+  const segments = relative.split(path.sep).filter(Boolean);
+  if (segments.some(segment => segment === 'node_modules' || segment === '.git' || /^\.env(?:\.|$)/i.test(segment))) {
+    throw new Error('Geschuetzter Pfad darf nicht verwendet werden');
+  }
+
+  const realHome = fs.realpathSync(homeDir);
+  let probe = resolvedPath;
+  while (!fs.existsSync(probe)) {
+    const parent = path.dirname(probe);
+    if (parent === probe) break;
+    probe = parent;
+  }
+  const realProbe = fs.realpathSync(probe);
+  const realRelative = path.relative(realHome, realProbe);
+  if (realRelative.startsWith('..') || path.isAbsolute(realRelative)) {
+    throw new Error('Symlink fuehrt ausserhalb des Egomorph-Core-Modell-Homes');
+  }
+}
+
 function readAllowedModelFile(homeDir, requestedPath, maxChars = DEFAULT_MAX_FILE_CONTEXT_CHARS) {
   const ext = path.extname(String(requestedPath || '')).toLowerCase();
   if (BLOCKED_SCRIPT_EXTENSIONS.has(ext)) {
@@ -411,6 +440,7 @@ function readAllowedModelFile(homeDir, requestedPath, maxChars = DEFAULT_MAX_FIL
   }
 
   const resolved = resolveWithinModelHome(homeDir, requestedPath);
+  assertSafeModelHomePath(homeDir, resolved.resolved);
   let stat;
   try {
     stat = fs.statSync(resolved.resolved);
@@ -511,6 +541,7 @@ function writeModelMarkdownFile(homeDir, requestedPath, content, options = {}) {
   }
 
   let target = resolveWithinModelHome(homeDir, normalizedPath);
+  assertSafeModelHomePath(homeDir, target.resolved);
   let relative = target.relative.replace(/\\/g, '/');
   if (relative.toLowerCase() === MEMORY_FILE_NAME.toLowerCase()) {
     throw new Error('memory.md ist fuer Memory-Eintraege reserviert');
@@ -529,6 +560,50 @@ function writeModelMarkdownFile(homeDir, requestedPath, content, options = {}) {
   return {
     path: relative,
     bytes: Buffer.byteLength(markdown, 'utf8'),
+    overwritten
+  };
+}
+
+function validateExtendedFilePath(homeDir, requestedPath) {
+  ensureModelHome(homeDir);
+  const ext = path.extname(String(requestedPath || '')).toLowerCase();
+  if (!EXTENDED_FILE_EXTENSIONS.has(ext)) {
+    throw new Error('Der erweiterte Datei-Skill erlaubt nur .js, .css, .html und .py');
+  }
+  const target = resolveWithinModelHome(homeDir, requestedPath);
+  assertSafeModelHomePath(homeDir, target.resolved);
+  return target;
+}
+
+function readExtendedModelFile(homeDir, requestedPath, maxChars = DEFAULT_MAX_MODEL_FILE_WRITE_CHARS) {
+  const target = validateExtendedFilePath(homeDir, requestedPath);
+  let stat;
+  try { stat = fs.statSync(target.resolved); } catch (_) { throw new Error('Datei nicht gefunden'); }
+  if (!stat.isFile()) throw new Error('Pfad ist keine Datei');
+  const raw = fs.readFileSync(target.resolved, 'utf8');
+  const trimmed = trimContext(raw, maxChars);
+  return {
+    path: target.relative.replace(/\\/g, '/'),
+    content: trimmed.text,
+    truncated: trimmed.truncated,
+    bytes: Buffer.byteLength(raw, 'utf8')
+  };
+}
+
+function writeExtendedModelFile(homeDir, requestedPath, content, options = {}) {
+  const target = validateExtendedFilePath(homeDir, requestedPath);
+  const raw = String(content == null ? '' : content).replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  const maxChars = options.maxChars || DEFAULT_MAX_MODEL_FILE_WRITE_CHARS;
+  if (raw.length > maxChars) throw new Error(`Dateiinhalt ist zu gross (maximal ${maxChars} Zeichen)`);
+  if (fs.existsSync(target.resolved) && options.overwrite === false) {
+    throw new Error('Datei existiert bereits und Ueberschreiben ist deaktiviert');
+  }
+  fs.mkdirSync(path.dirname(target.resolved), { recursive: true });
+  const overwritten = fs.existsSync(target.resolved);
+  fs.writeFileSync(target.resolved, raw, 'utf8');
+  return {
+    path: target.relative.replace(/\\/g, '/'),
+    bytes: Buffer.byteLength(raw, 'utf8'),
     overwritten
   };
 }
@@ -942,6 +1017,8 @@ async function runCodexAppServer({
   sessionId,
   resetSession,
   onToken,
+  onWebSearchStart,
+  onWebSearchComplete,
   reasoningEffort,
   signal,
   appServerClient
@@ -956,6 +1033,8 @@ async function runCodexAppServer({
     sessionId,
     resetSession,
     onToken,
+    onWebSearchStart,
+    onWebSearchComplete,
     reasoningEffort: normalizeReasoningEffort(reasoningEffort),
     signal
   });
@@ -1016,6 +1095,8 @@ async function runCodexCompletion(body, options = {}, callbacks = {}) {
     sessionId,
     resetSession: shouldResetCodexSession(body),
     onToken: callbacks.onToken,
+    onWebSearchStart: callbacks.onWebSearchStart,
+    onWebSearchComplete: callbacks.onWebSearchComplete,
     reasoningEffort: normalizeReasoningEffort(
       body.reasoning_effort ||
       body.reasoningEffort ||
@@ -1092,7 +1173,7 @@ function corsHeadersFor(origin, allowedOrigins) {
   return {
     'Access-Control-Allow-Origin': allowOrigin,
     'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type,Authorization',
+    'Access-Control-Allow-Headers': 'Content-Type,Authorization,X-Egomorph-Skill',
     'Access-Control-Allow-Private-Network': 'true',
     'Vary': 'Origin'
   };
@@ -1171,6 +1252,18 @@ async function streamChatCompletionFromRequest(req, res, body, options = {}, all
       onToken: token => {
         if (!token || requestAbort.signal.aborted) return;
         writeSseData(res, createChatCompletionChunk(id, created, model, { content: token }, null));
+      },
+      onWebSearchStart: item => {
+        if (requestAbort.signal.aborted) return;
+        const chunk = createChatCompletionChunk(id, created, model, {}, null);
+        chunk.egomorph = { skill_event: { id: 'codex.web_search', status: 'running', query: item && item.query || '' } };
+        writeSseData(res, chunk);
+      },
+      onWebSearchComplete: item => {
+        if (requestAbort.signal.aborted) return;
+        const chunk = createChatCompletionChunk(id, created, model, {}, null);
+        chunk.egomorph = { skill_event: { id: 'codex.web_search', status: 'completed', query: item && item.query || '' } };
+        writeSseData(res, chunk);
       }
     });
     if (!completion.content) {
@@ -1444,6 +1537,25 @@ function createServer(options = {}) {
         return;
       }
 
+      if ((req.method === 'GET' || req.method === 'POST') && url.pathname === '/egomorph/extended-files') {
+        if (req.headers['x-egomorph-skill'] !== EXTENDED_FILE_SKILL_ID) {
+          throw new Error('Erweiterter Dateizugriff erfordert den aktivierten Datei-Skill');
+        }
+        const homeDir = getModelHomeDir(options);
+        if (req.method === 'GET') {
+          const file = readExtendedModelFile(homeDir, url.searchParams.get('path') || '');
+          sendJson(req, res, 200, { ok: true, file }, allowedOrigins);
+          return;
+        }
+        const raw = await readBody(req);
+        const body = raw ? JSON.parse(raw) : {};
+        const file = writeExtendedModelFile(homeDir, body.path || body.filename || '', body.content, {
+          overwrite: body.overwrite !== false
+        });
+        sendJson(req, res, 200, { ok: true, file }, allowedOrigins);
+        return;
+      }
+
       if (req.method === 'GET' && url.pathname === '/v1/models') {
         const models = await getCodexModels(options);
         sendJson(req, res, 200, {
@@ -1534,10 +1646,12 @@ module.exports = {
   parseAllowedOrigins,
   prepareModelHomeContext,
   readAllowedModelFile,
+  readExtendedModelFile,
   runCodexAppServer,
   runCodexLoginStatus,
   runCodexExec,
   runCodexCompletion,
   streamChatCompletionFromRequest,
+  writeExtendedModelFile,
   writeModelMarkdownFile
 };
