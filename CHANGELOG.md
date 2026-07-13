@@ -16,6 +16,12 @@
 ## Unreleased
 
 ### Enhancements
+- Added **Learn with EgoMorph** (`learning.egomorph`), a translated manifest skill that adaptively teaches JavaScript and TypeScript through EgoMorph architecture, asks for the learner's level first, and generates quizzes, tasks, hints, and feedback without a canned answer catalogue.
+- Added the disabled-by-default `workspace.extended-files` manifest skill with separately granted read/write permissions for `.js`, `.css`, `.html`, and `.py` files inside the model home, plus protected-path and symlink containment checks.
+- Extended the generative skill loop to support up to six sequential accesses and display every actual or blocked access as its own ordered step-2 row, including repeated calls to the same skill.
+- Forwarded Codex App Server `webSearch` item lifecycle events through the gateway stream so native Codex research now appears reliably as a separate translated step-2 runtime access without inventing a source count.
+- Fixed the composer language switch so Markdown upload, Codex model, reasoning level, model-catalog status, and select options update immediately in German, English, and French.
+- Hardened skill-source provenance: planner skill markup is no longer exposed as a live answer, source counts are attached to the completed runtime result, and a zero-source final turn is explicitly forbidden from presenting citations or inherited source URLs.
 - Added live structured agent replies: analysis appears immediately, Codex and streaming API tokens update the reasoning/final sections in place, and non-streaming backends retain visible progress states.
 - Added explicit runtime skill-access telemetry with running, completed, and failed UI states; the skill section remains absent when no skill was accessed.
 - Corrected skill-result semantics: empty successful searches no longer appear as failures, technical failures remain distinct, and completed research reports the number of sources actually passed to the model.

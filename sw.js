@@ -1,6 +1,6 @@
 // Service Worker fuer App-Shell und Gateway-Dashboard: cached statische
 // UI-Dateien, laesst Gateway-API-Routen aber immer am Cache vorbei.
-const CACHE_NAME = 'egomorph-core-v34';
+const CACHE_NAME = 'egomorph-core-v38';
 const URLS_TO_CACHE = [
   './',
   'index.html',
@@ -10,6 +10,10 @@ const URLS_TO_CACHE = [
   'loader.js',
   'skills/internetSkill.js',
   'skills/internet/manifest.json',
+  'skills/extendedFileSkill.js',
+  'skills/extended-files/manifest.json',
+  'skills/learnWithEgomorphSkill.js',
+  'skills/learn-with-egomorph/manifest.json',
   'skillSystem.js',
   'agentResponse.js',
   'conversationStore.js',

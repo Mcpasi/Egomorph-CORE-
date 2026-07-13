@@ -66,6 +66,7 @@
 
   function persistConversation() { threads.setConversation(activeThreadId, conversation); }
   function translatedSkillName(skillId) {
+    if (skillId === 'codex.web_search') return window.egoT('codexWebSearchSkillName');
     var skill = window.EgoSkillSystem && window.EgoSkillSystem.getSkill
       ? window.EgoSkillSystem.getSkill(skillId)
       : null;
@@ -78,6 +79,8 @@
     if (run && run.status === 'blocked') return window.egoT('agentSkillBlocked');
     if (!run || run.status === 'running') return window.egoT('agentSkillRunning');
     if (run.status === 'failed') return window.egoT('agentSkillFailed');
+    if (run.id === 'workspace.extended-files' && run.operation === 'read') return window.egoT('agentSkillCompletedRead');
+    if (run.id === 'workspace.extended-files' && run.operation === 'write') return window.egoT('agentSkillCompletedWrite');
     if (run.resultCount === 0) return window.egoT('agentSkillCompletedNoSources');
     if (Number(run.resultCount) > 0) {
       return format('agentSkillCompletedSources', '{count} Quellen verwendet', { count: run.resultCount });
@@ -93,10 +96,10 @@
     var html = '<section class="agent-step agent-thought"><strong>' + escapeHtml(window.egoT('agentThoughtLabel')) + '</strong><span>' + escapeHtml(thought) + '</span></section>';
     if (skillRuns.length) {
       html += '<section class="agent-step agent-skill"><strong>' + escapeHtml(window.egoT('agentSkillLabel')) + '</strong>' +
-        skillRuns.map(function (run) {
+        '<div class="agent-skill-runs">' + skillRuns.map(function (run) {
           return '<span class="agent-skill-run" data-status="' + escapeHtml(run.status || 'completed') + '">' +
             escapeHtml(translatedSkillName(run.id)) + ' · ' + escapeHtml(skillRunStatus(run)) + '</span>';
-        }).join('') + '</section>';
+        }).join('') + '</div></section>';
     }
     html += '<div class="agent-final-separator">' + escapeHtml(window.egoT('agentFinalLabel')) + '</div>' +
       '<div class="agent-final-answer">' + escapeHtml(turn.reply || (turn.pending ? window.egoT('agentFinalWaiting') : '')) + '</div>';
@@ -202,9 +205,18 @@
     conversation.push(turn); renderConversation(); renderThreads();
     function updateSkill(skillId, status, detail) {
       if (!skillId) return;
-      var run = turn.skillRuns.find(function (item) { return item.id === skillId; });
+      var run = null;
+      if (status !== 'running' && status !== 'blocked') {
+        for (var runIndex = turn.skillRuns.length - 1; runIndex >= 0; runIndex--) {
+          if (turn.skillRuns[runIndex].id === skillId && turn.skillRuns[runIndex].status === 'running') {
+            run = turn.skillRuns[runIndex];
+            break;
+          }
+        }
+      }
       if (!run) { run = { id: skillId, status: status }; turn.skillRuns.push(run); }
       else run.status = status;
+      if (detail && /^(read|write)$/.test(detail.operation)) run.operation = detail.operation;
       if (detail && Number.isFinite(Number(detail.resultCount))) run.resultCount = Math.max(0, Math.round(Number(detail.resultCount)));
       renderConversation();
     }
@@ -214,10 +226,10 @@
           if (phase === 'model' && !turn.reply) turn.thought = window.egoT('agentModelWorkingStatus');
           renderConversation();
         },
-        onSkillStart: function (skillId) { updateSkill(skillId, 'running'); },
-        onSkillBlocked: function (skillId) { updateSkill(skillId, 'blocked'); },
+        onSkillStart: function (skillId, detail) { updateSkill(skillId, 'running', detail); },
+        onSkillBlocked: function (skillId, detail) { updateSkill(skillId, 'blocked', detail); },
         onSkillUse: function (skillId, detail) { updateSkill(skillId, 'completed', detail); },
-        onSkillError: function (skillId) { updateSkill(skillId, 'failed'); },
+        onSkillError: function (skillId, detail) { updateSkill(skillId, 'failed', detail); },
         onToken: function (_, streamedText) {
           var live = window.EgoAgentResponse.parseLive(streamedText, {
             fallbackThought: turn.thought,
@@ -250,6 +262,7 @@
         conversation.pop();
         if (input && !input.value.trim()) input.value = text;
       } else {
+        turn.skillRuns.forEach(function (run) { if (run.status === 'running') run.status = 'failed'; });
         turn.thought = window.egoT('agentProcessingFailed');
         turn.reply = format('replyErrorPrefix', 'Fehler: {message}', { message: error.message || error });
         turn.pending = false;
@@ -322,10 +335,24 @@
       codexModelLabel: 'codexModelLabel', codexMaxTokensLabel: 'codexMaxTokensLabel', codexMaxTokensHint: 'codexMaxTokensHint', codexSaveBtn: 'codexSaveBtn', codexTestBtn: 'codexTestBtn', codexStatusBtn: 'codexStatusBtn',
       chatModelSettingsSummary: 'chatModelSettingsTitle', chatModelIdLabel: 'chatModelIdLabel', reloadChatModelBtn: 'reloadChatModelBtn', llmMaxTokensLabel: 'llmMaxTokensLabel', llmEnabledLabel: 'llmEnabledLabel',
       chatModelSettingsHint: 'chatModelSettingsHint', lightChatModelsTitle: 'lightChatModelsTitle', languageSummary: 'languageSectionTitle', languageLabel: 'languageLabel',
-      conversationDrawerToggleLabel: 'conversationsTitle', conversationSidebarTitle: 'conversationsTitle', newConversationBtn: 'newConversationBtn', conversationSidebarHint: 'conversationSidebarHint', activeConversationEyebrow: 'activeConversationLabel'
+      conversationDrawerToggleLabel: 'conversationsTitle', conversationSidebarTitle: 'conversationsTitle', newConversationBtn: 'newConversationBtn', conversationSidebarHint: 'conversationSidebarHint', activeConversationEyebrow: 'activeConversationLabel',
+      markdownUploadBtn: 'markdownUploadBtn', codexModelSelectLabel: 'codexModelSelectLabel', codexReasoningSelectLabel: 'codexReasoningSelectLabel'
     };
     Object.keys(textMap).forEach(function (id) { var el = byId(id); if (el) el.innerHTML = window.egoT(textMap[id]); });
     if (input) input.placeholder = window.egoT('placeholder');
+    var markdownUpload = byId('markdownUploadBtn');
+    if (markdownUpload) markdownUpload.title = window.egoT('markdownUploadTitle');
+    var codexModelSelect = byId('codexModelSelect');
+    if (codexModelSelect && codexModelSelect.options.length) codexModelSelect.options[0].textContent = window.egoT('codexDefaultModel');
+    var reasoningSelect = byId('codexReasoningSelect');
+    if (reasoningSelect) {
+      var reasoningKeys = { '': 'codexReasoningOff', low: 'codexReasoningLow', medium: 'codexReasoningMedium', high: 'codexReasoningHigh' };
+      Array.prototype.forEach.call(reasoningSelect.options, function (option) {
+        if (reasoningKeys[option.value] != null) option.textContent = window.egoT(reasoningKeys[option.value]);
+      });
+    }
+    var modelStatus = byId('codexModelSelectStatus');
+    if (modelStatus && modelStatus.dataset.i18nKey) modelStatus.textContent = window.egoT(modelStatus.dataset.i18nKey);
     var info = byId('infoContent'); if (info) info.innerHTML = window.egoT('infoText');
     renderConversation(); renderThreads(); renderSkillCatalog();
     document.dispatchEvent(new CustomEvent('ego-language-change', { detail: { language: language } }));
@@ -485,9 +512,18 @@
   async function loadCodexModels() {
     var controls = byId('codexComposerControls'); if (!controls || !window.egoProfile) return;
     var codex = window.egoProfile.usesCodex(); controls.hidden = !codex; if (!codex) return;
-    var select = byId('codexModelSelect'); var status = byId('codexModelSelectStatus'); status.textContent = window.egoT('codexModelsLoading');
-    try { var models = await window.egoProfile.listCodexModels(); models.forEach(function (model) { var option = document.createElement('option'); option.value = model.id; option.textContent = model.display_name || model.id; select.appendChild(option); }); select.value = window.egoProfile.getCodexConfig().model || ''; status.textContent = window.egoT('codexModelsLoaded'); }
-    catch (_) { status.textContent = window.egoT('codexModelsUnavailable'); }
+    var select = byId('codexModelSelect'); var status = byId('codexModelSelectStatus');
+    function setModelStatus(key) { status.dataset.i18nKey = key; status.textContent = window.egoT(key); }
+    setModelStatus('codexModelsLoading');
+    try {
+      var models = await window.egoProfile.listCodexModels();
+      while (select.options.length > 1) select.remove(1);
+      select.options[0].textContent = window.egoT('codexDefaultModel');
+      models.forEach(function (model) { var option = document.createElement('option'); option.value = model.id; option.textContent = model.display_name || model.id; select.appendChild(option); });
+      select.value = window.egoProfile.getCodexConfig().model || '';
+      setModelStatus('codexModelsLoaded');
+    }
+    catch (_) { setModelStatus('codexModelsUnavailable'); }
   }
   if (byId('codexModelSelect')) byId('codexModelSelect').addEventListener('change', function () { var cfg = window.egoProfile.getCodexConfig(); window.egoProfile.setCodexConfig(cfg.url, this.value); });
   if (byId('codexReasoningSelect')) byId('codexReasoningSelect').addEventListener('change', function () { window.egoProfile.setCodexReasoningEffort(this.value); });

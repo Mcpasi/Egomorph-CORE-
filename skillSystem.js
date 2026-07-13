@@ -2,7 +2,11 @@
   'use strict';
 
   var STATE_KEY = 'egoSkillStatesV1';
-  var MANIFEST_URLS = ['skills/internet/manifest.json'];
+  var MANIFEST_URLS = [
+    'skills/internet/manifest.json',
+    'skills/extended-files/manifest.json',
+    'skills/learn-with-egomorph/manifest.json'
+  ];
   var VALID_PROFILES = ['full', 'api', 'codex'];
   var manifests = [];
   var states = readJson(STATE_KEY, {});
@@ -155,6 +159,17 @@
     });
   }
 
+  function canRunWithPermissions(id, profile, permissionIds) {
+    var skill = getSkill(id);
+    if (!skill || !skill.state.installed || !skill.state.enabled || skill.state.profiles.indexOf(profile) === -1) return false;
+    var requested = Array.isArray(permissionIds) ? permissionIds : [permissionIds];
+    if (!canRun(id, profile)) return false;
+    return requested.filter(Boolean).every(function (permissionId) {
+      return skill.manifest.permissions.some(function (permission) { return permission.id === permissionId; }) &&
+        skill.state.permissions[permissionId] === true;
+    });
+  }
+
   function getConfigForRun(id) {
     var skill = getSkill(id);
     if (!skill) return {};
@@ -197,6 +212,7 @@
     getConfig: getConfig,
     getConfigForRun: getConfigForRun,
     canRun: canRun,
+    canRunWithPermissions: canRunWithPermissions,
     recordRun: recordRun,
     loadEntrypoint: loadEntrypoint
   };

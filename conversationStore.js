@@ -25,6 +25,7 @@
           turn.skillRuns = item.skillRuns.map(function (run) {
             var status = run && /^(running|completed|failed|blocked)$/.test(run.status) ? run.status : 'completed';
             var cleanRun = { id: String(run && run.id || '').slice(0, 160), status: status === 'running' ? 'failed' : status };
+            if (run && /^(read|write)$/.test(run.operation)) cleanRun.operation = run.operation;
             if (run && Number.isFinite(Number(run.resultCount))) cleanRun.resultCount = Math.max(0, Math.round(Number(run.resultCount)));
             return cleanRun;
           }).filter(function (run) { return !!run.id; }).slice(0, 10);
