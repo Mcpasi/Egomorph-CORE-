@@ -2,7 +2,7 @@
 
 > **A local control center for agentic AI:** one installable browser interface, three interchangeable model paths, and a transparent permission-based skill system.
 
-[Deutsche Version](README.md) · [Detailed documentation](DOKUMENTATION_EN.md) · MIT License
+[Deutsche Version](README_DE.md) · [Detailed documentation](DOKUMENTATION_EN.md) · MIT License
 
 Egomorph Core brings together a local browser LLM, OpenAI-compatible APIs, and the official Codex CLI in a single PWA. In the agentic API and Codex profiles, the active model decides semantically whether it needs an approved skill. Every real access is visible, permissions are checked before execution, and private working files stay inside a restricted local model home.
 
