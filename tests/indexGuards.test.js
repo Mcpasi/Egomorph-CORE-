@@ -38,6 +38,10 @@ describe('index.html runtime guards', () => {
     expect(app).toContain("if (input && !input.value.trim()) input.value = text");
     expect(style).toContain('.codex-composer-controls');
     expect(style).toContain('#stopBtn[hidden]');
+    expect(app).toContain("markdownUploadBtn: 'markdownUploadBtn'");
+    expect(app).toContain("codexModelSelectLabel: 'codexModelSelectLabel'");
+    expect(app).toContain("codexReasoningSelectLabel: 'codexReasoningSelectLabel'");
+    expect(app).toContain('modelStatus.dataset.i18nKey');
   });
 
   test('markdown upload is wired to the model-home gateway helper', () => {
@@ -56,10 +60,12 @@ describe('index.html runtime guards', () => {
     expect(app).toContain('agentThoughtLabel');
     expect(app).toContain('agentSkillLabel');
     expect(app).toContain('agentFinalLabel');
-    expect(app).toContain("onSkillStart: function (skillId)");
-    expect(app).toContain("onSkillBlocked: function (skillId)");
+    expect(app).toContain("onSkillStart: function (skillId, detail)");
+    expect(app).toContain("onSkillBlocked: function (skillId, detail)");
     expect(app).toContain('window.EgoAgentResponse.parseLive');
-    expect(app).toContain("updateSkill(skillId, 'running')");
+    expect(app).toContain("updateSkill(skillId, 'running', detail)");
+    expect(app).toContain('agent-skill-runs');
+    expect(app).toContain("skillId === 'codex.web_search'");
     expect(style).toContain('.agent-final-separator');
     expect(style).toContain('.agent-skill-run[data-status="running"]');
   });

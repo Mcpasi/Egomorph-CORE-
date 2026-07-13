@@ -50,6 +50,18 @@ describe('translation files', () => {
     }
   });
 
+  test('composer controls have native English and French translations', () => {
+    const locales = loadLocales();
+    const keys = ['markdownUploadBtn', 'codexModelSelectLabel', 'codexReasoningSelectLabel', 'codexModelsLoaded'];
+
+    for (const lang of ['en', 'fr']) {
+      for (const key of keys) {
+        expect(locales[lang].ui[key]).toEqual(expect.any(String));
+        expect(locales[lang].ui[key]).not.toBe(locales.de.ui[key]);
+      }
+    }
+  });
+
   test('removed classification translations do not return', () => {
     const locales = loadLocales();
     for (const lang of localeFiles) {

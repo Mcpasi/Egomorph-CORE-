@@ -53,7 +53,58 @@ function createInterruptibleAppServer(messages, turnStarted) {
   return child;
 }
 
+function createWebSearchAppServer() {
+  const child = new EventEmitter();
+  child.pid = 4444;
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  child.stdin = {
+    write(line) {
+      const message = JSON.parse(String(line).trim());
+      if (!message.id) return true;
+      let result = {};
+      if (message.method === 'thread/start') result = { thread: { id: 'thread-web' } };
+      if (message.method === 'turn/start') result = { turn: { id: 'turn-web', status: 'inProgress' } };
+      process.nextTick(() => {
+        child.stdout.emit('data', Buffer.from(`${JSON.stringify({ id: message.id, result })}\n`));
+        if (message.method === 'turn/start') {
+          setImmediate(() => {
+            const notifications = [
+              { method: 'item/started', params: { threadId: 'thread-web', turnId: 'turn-web', item: { id: 'web-1', type: 'webSearch', query: 'news' } } },
+              { method: 'item/completed', params: { threadId: 'thread-web', turnId: 'turn-web', item: { id: 'web-1', type: 'webSearch', query: 'news' } } },
+              { method: 'item/agentMessage/delta', params: { threadId: 'thread-web', turnId: 'turn-web', delta: 'Aktuell' } },
+              { method: 'turn/completed', params: { threadId: 'thread-web', turn: { id: 'turn-web', status: 'completed' } } }
+            ];
+            notifications.forEach(notification => child.stdout.emit('data', Buffer.from(`${JSON.stringify(notification)}\n`)));
+          });
+        }
+      });
+      return true;
+    }
+  };
+  return child;
+}
+
 describe('codex app-server client', () => {
+  test('forwards authoritative Codex web-search item lifecycle events', async () => {
+    const client = new CodexAppServerClient({
+      spawnImpl: createWebSearchAppServer,
+      requestTimeoutMs: 1000,
+      turnTimeoutMs: 10000
+    });
+    const events = [];
+
+    const result = await client.runTurn({
+      prompt: 'Was ist aktuell?',
+      sessionId: 'chat-web',
+      onWebSearchStart: item => events.push(['started', item.id]),
+      onWebSearchComplete: item => events.push(['completed', item.id])
+    });
+
+    expect(result.content).toBe('Aktuell');
+    expect(events).toEqual([['started', 'web-1'], ['completed', 'web-1']]);
+  });
+
   test('rejects an active turn immediately when the app server exits', async () => {
     const client = new CodexAppServerClient({
       spawnImpl: createClosingAppServer,

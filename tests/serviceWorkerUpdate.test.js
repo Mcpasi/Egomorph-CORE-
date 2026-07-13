@@ -6,7 +6,7 @@ const root = path.resolve(__dirname, '..');
 const sw = fs.readFileSync(path.join(root, 'sw.js'), 'utf8');
 const index = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 const app = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
-const CACHE_NAME = 'egomorph-core-v34';
+const CACHE_NAME = 'egomorph-core-v38';
 
 function createServiceWorkerHarness(activeWorker = null) {
   const listeners = {};
@@ -113,6 +113,10 @@ describe('service worker update flow', () => {
     expect(urls).toEqual(expect.arrayContaining([
       'skills/internetSkill.js',
       'skills/internet/manifest.json',
+      'skills/extendedFileSkill.js',
+      'skills/extended-files/manifest.json',
+      'skills/learnWithEgomorphSkill.js',
+      'skills/learn-with-egomorph/manifest.json',
       'skillSystem.js',
       'agentResponse.js',
       'conversationStore.js',

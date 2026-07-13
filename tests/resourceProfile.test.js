@@ -125,7 +125,9 @@ describe('resourceProfile', () => {
   test('streams OpenAI-compatible API tokens into the live callback', async () => {
     const stream = new ReadableStream({
       start(controller) {
+        controller.enqueue(Buffer.from('data: {"choices":[{"delta":{}}],"egomorph":{"skill_event":{"id":"codex.web_search","status":"running"}}}\n\n'));
         controller.enqueue(Buffer.from('data: {"choices":[{"delta":{"content":"<egomorph_thought>Live</egomorph_thought>"}}]}\n\n'));
+        controller.enqueue(Buffer.from('data: {"choices":[{"delta":{}}],"egomorph":{"skill_event":{"id":"codex.web_search","status":"completed"}}}\n\n'));
         controller.enqueue(Buffer.from('data: {"choices":[{"delta":{"content":"<egomorph_final>Antwort</egomorph_final>"}}]}\n\n'));
         controller.enqueue(Buffer.from('data: [DONE]\n\n'));
         controller.close();
@@ -139,13 +141,17 @@ describe('resourceProfile', () => {
     }));
     const { window } = createHarness(fetchMock);
     const onToken = jest.fn();
+    const onSkillStart = jest.fn();
+    const onSkillUse = jest.fn();
 
     window.egoProfile.setApiConfig('https://api.openai.com', '', 'test-model');
-    const reply = await window.egoProfile.apiGenerateReply('Hallo', { onToken });
+    const reply = await window.egoProfile.apiGenerateReply('Hallo', { onToken, onSkillStart, onSkillUse });
 
     expect(reply).toContain('<egomorph_final>Antwort</egomorph_final>');
     expect(onToken).toHaveBeenCalledTimes(2);
     expect(onToken.mock.calls[1][1]).toContain('Antwort');
+    expect(onSkillStart).toHaveBeenCalledWith('codex.web_search');
+    expect(onSkillUse).toHaveBeenCalledWith('codex.web_search', {});
     expect(JSON.parse(fetchMock.mock.calls[0][1].body).stream).toBe(true);
   });
 
@@ -210,10 +216,103 @@ describe('resourceProfile', () => {
     const plannerBody = JSON.parse(fetchMock.mock.calls[0][1].body);
     expect(plannerBody.messages[0].content).toContain('entscheidest semantisch selbst');
     const body = JSON.parse(fetchMock.mock.calls[1][1].body);
+    expect(body.messages[0].content).toContain('exakt 1 aufbereitete Webquellen');
+    expect(body.messages[0].content).toContain('keine Quellen aus frueheren Nachrichten');
     expect(body.messages[1]).toEqual({
       role: 'system',
       content: expect.stringContaining('https://example.test/x')
     });
+  });
+
+  test('starts an adaptive Learn with EgoMorph turn through a real skill access', async () => {
+    const fetchMock = jest.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ choices: [{ message: { content: '<egomorph_skill_request>{"skill":"learning.egomorph"}</egomorph_skill_request>' } }] }),
+        text: async () => ''
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ choices: [{ message: { content: '<egomorph_thought>Lernstart vorbereitet.</egomorph_thought><egomorph_final>Auf welchem JavaScript-Level bist du?</egomorph_final>' } }] }),
+        text: async () => ''
+      });
+    const { window } = createHarness(fetchMock);
+    window.EgoSkillSystem = {
+      ready: Promise.resolve(),
+      canRun: jest.fn((id, profile) => id === 'learning.egomorph' && profile === 'api'),
+      recordRun: jest.fn()
+    };
+    window.EgoLearnWithEgomorphSkill = {
+      createContext: jest.fn(() => 'Adaptiver Tutor-Kontext ohne vorgefertigte Antworten; frage zuerst nach dem Niveau.')
+    };
+    const onSkillStart = jest.fn();
+    const onSkillUse = jest.fn();
+
+    window.egoProfile.setApiConfig('https://api.openai.com', '', 'test-model');
+    const reply = await window.egoProfile.apiGenerateReply('Ich möchte JavaScript mit EgoMorph lernen.', { onSkillStart, onSkillUse });
+
+    expect(reply).toContain('Auf welchem JavaScript-Level');
+    expect(window.EgoLearnWithEgomorphSkill.createContext).toHaveBeenCalledWith({ language: 'de' });
+    expect(window.EgoSkillSystem.recordRun).toHaveBeenCalledWith('learning.egomorph');
+    expect(onSkillStart).toHaveBeenCalledWith('learning.egomorph');
+    expect(onSkillUse).toHaveBeenCalledWith('learning.egomorph', {});
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const planner = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(planner.messages[0].content).toContain('{"skill":"learning.egomorph"}');
+    const teaching = JSON.parse(fetchMock.mock.calls[1][1].body);
+    expect(teaching.messages[1].content).toContain('ohne vorgefertigte Antworten');
+  });
+
+  test('reports a requested learning skill as blocked when it is unavailable', async () => {
+    const fetchMock = jest.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ choices: [{ message: { content: '<egomorph_skill_request>{"skill":"learning.egomorph"}</egomorph_skill_request>' } }] }),
+        text: async () => ''
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ choices: [{ message: { content: '<egomorph_thought>Skill blockiert.</egomorph_thought><egomorph_final>Der Lern-Skill ist deaktiviert.</egomorph_final>' } }] }),
+        text: async () => ''
+      });
+    const { window } = createHarness(fetchMock);
+    const onSkillBlocked = jest.fn();
+    const onSkillStart = jest.fn();
+
+    window.egoProfile.setApiConfig('https://api.openai.com', '', 'test-model');
+    await window.egoProfile.apiGenerateReply('Starte den Tutor.', { onSkillBlocked, onSkillStart });
+
+    expect(onSkillBlocked).toHaveBeenCalledWith('learning.egomorph');
+    expect(onSkillStart).not.toHaveBeenCalled();
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).messages[0].content).toContain('learning.egomorph ist fuer diesen Turn nicht verfuegbar');
+  });
+
+  test('rejects extra learning-skill parameters instead of executing them', async () => {
+    const fetchMock = jest.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ choices: [{ message: { content: '<egomorph_skill_request>{"skill":"learning.egomorph","answer":"fixed"}</egomorph_skill_request>' } }] }),
+        text: async () => ''
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ choices: [{ message: { content: '<egomorph_thought>Ohne Skill.</egomorph_thought><egomorph_final>Sichere Antwort.</egomorph_final>' } }] }),
+        text: async () => ''
+      });
+    const { window } = createHarness(fetchMock);
+    window.EgoSkillSystem = {
+      ready: Promise.resolve(),
+      canRun: jest.fn(() => true),
+      recordRun: jest.fn()
+    };
+    window.EgoLearnWithEgomorphSkill = { createContext: jest.fn(() => 'Tutor-Kontext') };
+
+    window.egoProfile.setApiConfig('https://api.openai.com', '', 'test-model');
+    const reply = await window.egoProfile.apiGenerateReply('Lernen');
+
+    expect(reply).toContain('Sichere Antwort');
+    expect(window.EgoLearnWithEgomorphSkill.createContext).not.toHaveBeenCalled();
+    expect(window.EgoSkillSystem.recordRun).not.toHaveBeenCalled();
   });
 
   test('does not run internet research merely because the user text contains old trigger words', async () => {
@@ -233,6 +332,53 @@ describe('resourceProfile', () => {
 
     expect(window.EgoInternetSkill.search).not.toHaveBeenCalled();
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  test('runs multiple explicitly approved file accesses sequentially', async () => {
+    const fetchMock = jest.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ choices: [{ message: { content: '<egomorph_skill_request>{"skill":"workspace.extended-files","operation":"read","path":"app.js"}</egomorph_skill_request>' } }] }),
+        text: async () => ''
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ choices: [{ message: { content: '<egomorph_skill_request>{"skill":"workspace.extended-files","operation":"write","path":"style.css","content":"body { color: teal; }","overwrite":true}</egomorph_skill_request>' } }] }),
+        text: async () => ''
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ choices: [{ message: { content: '<egomorph_thought>Dateien verarbeitet.</egomorph_thought><egomorph_final>Fertig.</egomorph_final>' } }] }),
+        text: async () => ''
+      });
+    const { window } = createHarness(fetchMock);
+    window.EgoSkillSystem = {
+      ready: Promise.resolve(),
+      canRunWithPermissions: jest.fn(() => true),
+      recordRun: jest.fn()
+    };
+    window.EgoExtendedFileSkill = {
+      read: jest.fn(async () => ({ ok: true, file: { content: 'console.log("alt");' } })),
+      write: jest.fn(async () => ({ ok: true, file: { bytes: 21, overwritten: true } }))
+    };
+    const onSkillStart = jest.fn();
+    const onSkillUse = jest.fn();
+
+    window.egoProfile.setApiConfig('https://api.openai.com', '', 'test-model');
+    const reply = await window.egoProfile.apiGenerateReply('Bearbeite die beiden vereinbarten Projektdateien.', { onSkillStart, onSkillUse });
+
+    expect(reply).toContain('<egomorph_final>Fertig.</egomorph_final>');
+    expect(window.EgoExtendedFileSkill.read).toHaveBeenCalledWith('app.js', expect.any(Object));
+    expect(window.EgoExtendedFileSkill.write).toHaveBeenCalledWith('style.css', 'body { color: teal; }', expect.objectContaining({ overwrite: true }));
+    expect(onSkillStart).toHaveBeenNthCalledWith(1, 'workspace.extended-files', { operation: 'read' });
+    expect(onSkillStart).toHaveBeenNthCalledWith(2, 'workspace.extended-files', { operation: 'write' });
+    expect(onSkillUse).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    const secondBody = JSON.parse(fetchMock.mock.calls[1][1].body);
+    expect(secondBody.messages[1].content).toContain('console.log');
+    const finalBody = JSON.parse(fetchMock.mock.calls[2][1].body);
+    expect(finalBody.messages[1].content).toContain('console.log');
+    expect(finalBody.messages[2].content).toContain('erfolgreich geschrieben');
   });
 
   test('recovers from an invalid model skill request without executing a skill', async () => {
@@ -271,6 +417,9 @@ describe('resourceProfile', () => {
     expect(onSkillUse).toHaveBeenCalledWith('internet.research', { resultCount: 0 });
     expect(onSkillError).not.toHaveBeenCalled();
     expect(window.EgoInternetSkill.formatForPrompt).toHaveBeenCalledWith({ query: 'Thema', results: [] });
+    const finalBody = JSON.parse(fetchMock.mock.calls[1][1].body);
+    expect(finalBody.messages[0].content).toContain('keine Webquelle an dich uebergeben');
+    expect(finalBody.messages[0].content).toContain('keine Quellenangaben, Quellenliste oder als Beleg gemeinten URLs');
   });
 
   test('reports a technical skill failure when source formatting throws', async () => {

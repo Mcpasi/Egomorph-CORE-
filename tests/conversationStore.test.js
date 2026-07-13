@@ -111,4 +111,22 @@ describe('conversation store', () => {
 
     expect(thread.conversation[0].skillRuns[0].status).toBe('blocked');
   });
+
+  test('persists repeated accesses to the same skill in display order', () => {
+    const store = createTestStore(createStorage());
+    const active = store.getActiveThread();
+    const thread = store.setConversation(active.id, [{
+      user: 'Lies und schreibe zwei Dateien',
+      reply: 'Fertig',
+      skillRuns: [
+        { id: 'workspace.extended-files', status: 'completed', operation: 'read' },
+        { id: 'workspace.extended-files', status: 'completed', operation: 'write' }
+      ]
+    }]);
+
+    expect(thread.conversation[0].skillRuns).toEqual([
+      { id: 'workspace.extended-files', status: 'completed', operation: 'read' },
+      { id: 'workspace.extended-files', status: 'completed', operation: 'write' }
+    ]);
+  });
 });

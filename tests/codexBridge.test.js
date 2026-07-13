@@ -11,7 +11,9 @@ const {
   normalizeMessages,
   parseCodexLoginStatus,
   readAllowedModelFile,
+  readExtendedModelFile,
   runCodexCompletion,
+  writeExtendedModelFile,
   writeModelMarkdownFile
 } = require('../scripts/codex-bridge');
 const fs = require('fs');
@@ -182,6 +184,33 @@ describe('codex bridge', () => {
       .toThrow('reserviert');
   });
 
+  test('reads and writes only approved extended file types inside the model home', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'egomorph-extended-home-'));
+
+    const written = writeExtendedModelFile(home, 'src/app.js', 'console.log("ok");\n');
+    expect(written).toEqual(expect.objectContaining({ path: 'src/app.js', overwritten: false }));
+    expect(readExtendedModelFile(home, 'src/app.js')).toEqual(expect.objectContaining({
+      path: 'src/app.js',
+      content: 'console.log("ok");\n'
+    }));
+
+    writeExtendedModelFile(home, 'styles/site.css', 'body {}');
+    writeExtendedModelFile(home, 'page.html', '<main></main>');
+    writeExtendedModelFile(home, 'tool.py', 'print("ok")');
+    expect(() => writeExtendedModelFile(home, 'notes.md', '# Nein')).toThrow('nur .js, .css, .html und .py');
+    expect(() => readExtendedModelFile(home, '../app.js')).toThrow('ausserhalb');
+    expect(() => writeExtendedModelFile(home, 'node_modules/pkg/app.js', 'bad')).toThrow('Geschuetzter Pfad');
+  });
+
+  test('blocks symlinks that escape the model home', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'egomorph-symlink-home-'));
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'egomorph-outside-'));
+    fs.symlinkSync(outside, path.join(home, 'escape'));
+
+    expect(() => writeExtendedModelFile(home, 'escape/app.js', 'bad'))
+      .toThrow('Symlink fuehrt ausserhalb');
+  });
+
   test('creates OpenAI-compatible chat completion response without running real codex', async () => {
     const runner = jest.fn(async ({ prompt, model, timeoutMs }) => {
       expect(prompt).toContain('Nutzer: Hallo');
@@ -218,11 +247,13 @@ describe('codex bridge', () => {
 
   test('passes session metadata and token callbacks through the app-server completion path', async () => {
     const tokens = [];
-    const runner = jest.fn(async ({ onToken, sessionId, followupPrompt }) => {
+    const runner = jest.fn(async ({ onToken, onWebSearchStart, onWebSearchComplete, sessionId, followupPrompt }) => {
       expect(sessionId).toBe('chat-1');
       expect(followupPrompt).toContain('Aktuelle Nutzeranfrage');
+      onWebSearchStart({ type: 'webSearch', query: 'aktuelle Daten' });
       onToken('Hal');
       onToken('lo');
+      onWebSearchComplete({ type: 'webSearch', query: 'aktuelle Daten' });
       return {
         content: 'Hallo',
         engine: 'app-server',
@@ -232,22 +263,55 @@ describe('codex bridge', () => {
       };
     });
 
+    const webSearchEvents = [];
     const completion = await runCodexCompletion({
       stream: true,
       messages: [{ role: 'user', content: 'Hallo' }],
       egomorph: { sessionId: 'chat-1' }
     }, { runCodex: runner }, {
-      onToken: token => tokens.push(token)
+      onToken: token => tokens.push(token),
+      onWebSearchStart: item => webSearchEvents.push(['started', item.query]),
+      onWebSearchComplete: item => webSearchEvents.push(['completed', item.query])
     });
 
     expect(completion.content).toBe('Hallo');
     expect(tokens).toEqual(['Hal', 'lo']);
+    expect(webSearchEvents).toEqual([['started', 'aktuelle Daten'], ['completed', 'aktuelle Daten']]);
     expect(completion.metadata).toEqual(expect.objectContaining({
       engine: 'app-server',
       sessionId: 'chat-1',
       threadId: 'thread-1',
       turnId: 'turn-1'
     }));
+  });
+
+  test('streams Codex web-search lifecycle events to the browser protocol', async () => {
+    const server = require('../scripts/codex-bridge').createServer({
+      runCodex: async ({ onToken, onWebSearchStart, onWebSearchComplete }) => {
+        onWebSearchStart({ type: 'webSearch', query: 'recent event' });
+        onToken('<egomorph_final>Aktuell</egomorph_final>');
+        onWebSearchComplete({ type: 'webSearch', query: 'recent event' });
+        return '<egomorph_final>Aktuell</egomorph_final>';
+      }
+    });
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+    const { port } = server.address();
+
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/v1/chat/completions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ stream: true, messages: [{ role: 'user', content: 'Was ist aktuell?' }] })
+      });
+      const body = await response.text();
+
+      expect(response.headers.get('content-type')).toContain('text/event-stream');
+      expect(body).toContain('"skill_event":{"id":"codex.web_search","status":"running"');
+      expect(body).toContain('"skill_event":{"id":"codex.web_search","status":"completed"');
+      expect(body).toContain('<egomorph_final>Aktuell</egomorph_final>');
+    } finally {
+      await new Promise(resolve => server.close(resolve));
+    }
   });
 
   test('maps the live app-server model catalog to the gateway model format', async () => {
